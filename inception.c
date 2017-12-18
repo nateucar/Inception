@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <execinfo.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <unistd.h>
@@ -58,7 +59,27 @@ static void elog(const char const * format, ...)
 	va_end(args);
 }
 
-#define abort() exit(1) //otherwise we can leak ptys
+void print_trace(void)
+{
+    void *array[10];
+    size_t size;
+    char **strings;
+    size_t i;
+
+    size = backtrace (array, 10);
+    strings = backtrace_symbols (array, size);
+
+    printf ("Obtained %zd stack frames.\n", size);
+
+    for (i = 0; i < size; i++)
+	printf ("%s\n", strings[i]);
+
+    free (strings);
+
+    exit(1);
+}
+
+#define abort() print_trace()
 
 void drop_permissions(uid_t real_uid, gid_t real_gid, char* real_name)
 {
@@ -451,8 +472,16 @@ int parse_config(const char* const filename, const char* const key, image_config
 
 	json_error_t json_err;
 	FILE* const config_fd = fopen(filename, "r");
+	if(!config_fd)
+	{
+		elog("Error opening config.\n");
+		perror("Error opening config.");
+		abort(); 
+	}
+
 	const json_t* const config_root = json_loadf(config_fd, 0, &json_err);
-	if(!fclose(config_fd)) abort();
+
+	fclose(config_fd);
 
 	if(!config_root)
 	{
@@ -466,6 +495,7 @@ int parse_config(const char* const filename, const char* const key, image_config
 	    elog("Error: Image not found\n");
 
 	json_decref((json_t*) config_root);
+	printf("sad taco\n");
 
 	return ret;
 }
@@ -516,6 +546,7 @@ char** load_insecure_environ(pid_t pid)
 	if(env_fd < 0)
 	{
 		elog("Error loading environment\n");
+		perror("Unable to open /proc/$$/environ");
 		abort();
 	}
 	char* procenviron = (char*) malloc(sizeof(char)*READ_CHUNK_SIZE);
